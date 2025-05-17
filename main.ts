@@ -600,21 +600,23 @@ export default class CanvasDailyNotePlugin extends Plugin {
 		let x = startPosition.x;
 		let y = startPosition.y;
 		
-		// If there are existing nodes, position the new one to the right of the rightmost node
+		// If there are existing nodes, find the rightmost node and position accordingly
 		if (canvas.nodes.length > 0) {
 			const rightmostNode = canvas.nodes.reduce((rightmost, node) => {
 				return node.x > rightmost.x ? node : rightmost;
 			}, canvas.nodes[0]);
-			x = rightmostNode.x + rightmostNode.width + 50; // Add 50px spacing
+			x = rightmostNode.x + rightmostNode.width + 100; // Consistent spacing
+			y = rightmostNode.y; // Keep same y-level for row
 		}
 
 		console.log("Creating node for activity type:", activity.type); // Debug log
 
 		switch (activity.type) {
 			case "youtube":
-				width = 400;
-				height = 300;
+				width = 640;
+				height = 360;
 
+				// Create the video node
 				node = canvas.createLinkNode({
 					pos: {
 						x: x,
@@ -632,11 +634,37 @@ export default class CanvasDailyNotePlugin extends Plugin {
 					focus: true,
 					save: true,
 				});
-				break;
+
+				// Create a notes node below the video
+				const notesNode = canvas.createTextNode({
+					pos: {
+						x: x,
+						y: y + height + 20,
+						height: 200,
+						width: width, // Same width as video
+					},
+					size: {
+						x: x,
+						y: y + height + 20,
+						height: 200,
+						width: width, // Same width as video
+					},
+					text: "Notes for this video:\n\n",
+					focus: false,
+					save: true,
+				});
+
+				canvas.deselectAll();
+				canvas.addNode(node);
+				canvas.addNode(notesNode);
+				canvas.requestSave();
+				return x + width;
+
 			case "webpage":
-				width = 400;
-				height = 300;
+				width = 500;
+				height = 800;
 
+				// Create the webpage node
 				node = canvas.createLinkNode({
 					pos: {
 						x: x,
@@ -654,10 +682,35 @@ export default class CanvasDailyNotePlugin extends Plugin {
 					focus: true,
 					save: true,
 				});
-				break;
+
+				// Create a notes node to the right of the webpage
+				const webpageNotesNode = canvas.createTextNode({
+					pos: {
+						x: x + width + 20, // Position to the right
+						y: y,
+						height: height, // Same height as webpage
+						width: width, // Same width as webpage
+					},
+					size: {
+						x: x + width + 20,
+						y: y,
+						height: height,
+						width: width,
+					},
+					text: "Notes for this webpage:\n\n",
+					focus: false,
+					save: true,
+				});
+
+				canvas.deselectAll();
+				canvas.addNode(node);
+				canvas.addNode(webpageNotesNode);
+				canvas.requestSave();
+				return x + width + width + 20; // Return position including the notes node
+
 			case "create-flashcards":
-				width = 400;
-				height = 300;
+				width = 800;
+				height = 800;
 
 				node = canvas.createTextNode({
 					pos: {
@@ -678,8 +731,8 @@ export default class CanvasDailyNotePlugin extends Plugin {
 				});
 				break;
 			case "writing-activity":
-				width = 400;
-				height = 300;
+				width = 800;
+				height = 800;
 
 				node = canvas.createTextNode({
 					pos: {
@@ -700,8 +753,8 @@ export default class CanvasDailyNotePlugin extends Plugin {
 				});
 				break;
 			case "dialogue-tutoring":
-				width = 400;
-				height = 300;
+				width = 900;
+				height = 800;
 
 				node = canvas.createLinkNode({
 					pos: {
@@ -752,13 +805,13 @@ export default class CanvasDailyNotePlugin extends Plugin {
 				const [goals, strategies] = activity.prompt.split("\n\n");
 				const activities = await this.generateLearningActivities(goals, strategies);
 
-				// Create nodes for each activity
-				let currentX = x;
-				let currentY = y + height + 50; // Position below the initial node
+				// Create nodes for each activity in a single row
+				let currentX = x + width + 100; // Start after the initial node
+				let currentY = y; // Keep same y-level
 
 				for (const generatedActivity of activities) {
-					await this.createActivity(generatedActivity, { x: currentX, y: currentY });
-					currentX += 450; // Space nodes horizontally
+					const result = await this.createActivity(generatedActivity, { x: currentX, y: currentY });
+					currentX = result + 100; // Consistent spacing
 				}
 
 				return x + width;
@@ -1073,33 +1126,49 @@ Consider:
 3. Feedback and reflection
 4. Metacognitive strategies
 
+IMPORTANT GUIDELINES FOR LINKS:
+- For YouTube videos: Use links that are likely to be maintained and available for the foreseeable future
+- For webpages: Only use reputable educational websites, official documentation, or well-maintained educational resources
+- Avoid using temporary or unstable links
+- Prefer evergreen content that is likely to remain available
+- For YouTube, use the full watch URL format (https://www.youtube.com/watch?v=...)
+- For webpages, always use HTTPS URLs
+
 Respond with a JSON array of activities, where each activity follows this schema:
 {
   "type": "youtube" | "webpage" | "create-flashcards" | "writing-activity" | "dialogue-tutoring",
-  "url"?: string,  // for youtube and webpage types
-  "scaffold"?: string,  // for create-flashcards and writing-activity types
-  "systemPrompt"?: string  // for dialogue-tutoring type
+  "url"?: string,  // for youtube and webpage types - must be a complete, valid URL
+  "scaffold"?: string,  // for create-flashcards and writing-activity types, use markdown syntax with headings, it should provide a scaffold for a text document that the student will then engage within
+  "systemPrompt"?: string  // for dialogue-tutoring type, it should be a system prompt that instructs the LLM on how to behave for the tutoring activity, to meet the intended learning outcomes
 }
+
+Create 7 - 8 activities, with a dialogue tutoring activity in the middle.
+
+Do not include any other text than the JSON array, not even backticks. 
 
 Each activity should be specific and actionable.`;
 
 		try {
-			const completion = await openai.chat.completions.create({
-				model: "gpt-4",
-				messages: [
-					{
-						role: "system",
-						content: "You are a pedagogical learning orchestrator that creates structured learning activities based on user goals and preferences."
-					},
-					{
-						role: "user",
-						content: prompt
-					}
-				],
-				temperature: 0.7,
+			const completion = await openai.responses.create({
+				// model: "gpt-4.1",
+				// messages: [
+				// 	{
+				// 		role: "system",
+				// 		content: "You are a pedagogical learning orchestrator that creates structured learning activities based on user goals and preferences."
+				// 	},
+				// 	{
+				// 		role: "user",
+				// 		content: prompt
+				// 	}
+				// ],
+				input: prompt,
+				temperature: 1,
+				model: "gpt-4.1",
+    			tools: [ { type: "web_search_preview" } ],
 			});
 
-			const response = completion.choices[0]?.message?.content;
+			// const response = completion.choices[0]?.message?.content;
+			const response = completion.output_text;
 			if (!response) {
 				throw new Error("No response from OpenAI");
 			}
