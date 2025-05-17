@@ -282,6 +282,142 @@ class ActivityModal extends Modal {
 	}
 }
 
+class MultiActivityModal extends Modal {
+	private resolvePromise: (value: Activity[] | null) => void;
+	public containerEl: HTMLElement;
+
+	constructor(app: App) {
+		super(app);
+	}
+
+	onOpen() {
+		const { contentEl } = this;
+		this.containerEl = contentEl;
+		contentEl.createEl("h2", { text: "Create Multiple Activities" });
+
+		// Container for activity inputs
+		const activitiesDiv = contentEl.createDiv({ cls: "multi-activities-list" });
+		this.addActivityInput(activitiesDiv);
+
+		// Add button to add more activities
+		const addButton = contentEl.createEl("button", {
+			text: "Add Another Activity",
+			cls: "mod-cta"
+		});
+		addButton.addEventListener("click", () => {
+			this.addActivityInput(activitiesDiv);
+		});
+
+		// Add submit button
+		const submitButton = contentEl.createEl("button", {
+			text: "Create Activities",
+			cls: "mod-cta"
+		});
+		submitButton.addEventListener("click", () => {
+			this.submit(activitiesDiv);
+		});
+	}
+
+	private addActivityInput(parent: HTMLElement) {
+		const activityContainer = parent.createDiv({ cls: "activity-input-container" });
+
+		// Activity type selector
+		const typeSelect = activityContainer.createEl("select");
+		const activityTypes: Activity["type"][] = [
+			"youtube",
+			"webpage",
+			"create-flashcards",
+			"writing-activity",
+			"dialogue-tutoring"
+		];
+		activityTypes.forEach(type => {
+			typeSelect.createEl("option", {
+				text: type.replace(/-/g, " ").replace(/\b\w/g, l => l.toUpperCase()),
+				value: type
+			});
+		});
+
+		// Input field
+		const input = activityContainer.createEl("input", {
+			type: "text",
+			attr: { placeholder: "Enter value" }
+		});
+
+		// Remove button
+		const removeButton = activityContainer.createEl("button", {
+			text: "Remove",
+			cls: "mod-warning"
+		});
+		removeButton.addEventListener("click", () => {
+			activityContainer.remove();
+		});
+
+		// Update input placeholder based on type
+		typeSelect.addEventListener("change", () => {
+			const type = typeSelect.value as Activity["type"];
+			switch (type) {
+				case "youtube":
+					input.placeholder = "Enter YouTube URL";
+					break;
+				case "webpage":
+					input.placeholder = "Enter webpage URL";
+					break;
+				case "create-flashcards":
+					input.placeholder = "Enter flashcard scaffold";
+					break;
+				case "writing-activity":
+					input.placeholder = "Enter writing scaffold";
+					break;
+				case "dialogue-tutoring":
+					input.placeholder = "Enter system prompt";
+					break;
+			}
+		});
+	}
+
+	private submit(parent: HTMLElement) {
+		const activityContainers = parent.querySelectorAll(".activity-input-container");
+		const activities: Activity[] = [];
+		activityContainers.forEach(container => {
+			const type = (container.querySelector("select") as HTMLSelectElement).value as Activity["type"];
+			const value = (container.querySelector("input") as HTMLInputElement).value;
+			if (!value) return;
+			let activity: Activity;
+			switch (type) {
+				case "youtube":
+				case "webpage":
+					activity = { type, url: value };
+					break;
+				case "create-flashcards":
+				case "writing-activity":
+					activity = { type, scaffold: value };
+					break;
+				case "dialogue-tutoring":
+					activity = { type, systemPrompt: value };
+					break;
+			}
+			activities.push(activity);
+		});
+		this.resolvePromise(activities.length > 0 ? activities : null);
+		this.close();
+	}
+
+	onClose() {
+		const { contentEl } = this;
+		contentEl.empty();
+		if (this.resolvePromise) {
+			this.resolvePromise(null);
+		}
+	}
+
+	async open(): Promise<Activity[] | null> {
+		return new Promise((resolve) => {
+			this.resolvePromise = resolve;
+			super.open();
+		});
+	}
+}
+
 /**
  * This allows a "live-reload" of Obsidian when developing the plugin.
  * Any changes to the code will force reload Obsidian.
@@ -619,6 +755,36 @@ export default class CanvasDailyNotePlugin extends Plugin {
 				}
 			}
 		});
+
+		// Add multi-activity button
+		if (!cardMenuEl.querySelector(".canvas-button-multiactivity")) {
+			const button = cardMenuEl.createEl("div", {
+				attr: {
+					class: "canvas-card-menu-button canvas-button-multiactivity",
+				},
+			});
+			const icon = getIcon("workflow") || getIcon("list");
+			if (icon) button.appendChild(icon);
+			button.title = "Create Multiple Activities";
+			button.addEventListener("click", async () => {
+				const modal = new MultiActivityModal(this.app);
+				const activities = await modal.open();
+				if (activities && activities.length > 0) {
+					const canvasView = this.app.workspace.getActiveViewOfType(ItemView) as CanvasView;
+					if (canvasView?.getViewType() !== "canvas") {
+						new Notice("Please open a canvas first");
+						return;
+					}
+					const canvas = canvasView.canvas;
+					let currentX = 0;
+					let currentY = 0;
+					for (const activity of activities) {
+						this.createActivity(activity, { x: currentX, y: currentY });
+						currentX += 450; // space nodes horizontally
+					}
+				}
+			});
+		}
 	}
 
 	/**
