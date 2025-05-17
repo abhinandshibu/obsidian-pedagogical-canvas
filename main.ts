@@ -106,6 +106,10 @@ type Activity =
 	| {
 		type: "dialogue-tutoring";
 		systemPrompt: string;
+	}
+	| {
+		type: "llm-graph";
+		prompt: string;
 	};
 
 type Position = {
@@ -418,6 +422,87 @@ class MultiActivityModal extends Modal {
 	}
 }
 
+class LLMGraphModal extends Modal {
+	private resolvePromise: (value: Activity | null) => void;
+	private goalInputEl: HTMLTextAreaElement;
+	private strategyInputEl: HTMLTextAreaElement;
+
+	constructor(app: App) {
+		super(app);
+	}
+
+	onOpen() {
+		const { contentEl } = this;
+		contentEl.createEl("h2", { text: "Pedagogical Learning Orchestrator" });
+		
+		contentEl.createEl("p", { 
+			text: "Using principles from learning science and the Knowledge-Learning-Instruction (KLI) framework, I will analyze your goals and preferences to create a personalized sequence of learning activities. This will help optimize your learning experience by incorporating evidence-based strategies and scaffolding techniques.",
+			attr: {
+				style: "margin-bottom: 20px; line-height: 1.5;"
+			}
+		});
+
+		// First text area for goals
+		contentEl.createEl("h3", { text: "What is your goal for studying today?" });
+		this.goalInputEl = contentEl.createEl("textarea", {
+			attr: {
+				placeholder: "Enter your study goals...",
+				rows: "6",
+				style: "width: 100%; margin-bottom: 20px;"
+			}
+		});
+
+		// Second text area for strategies
+		contentEl.createEl("h3", { text: "Do you have any ideas for strategies you would like to follow?" });
+		this.strategyInputEl = contentEl.createEl("textarea", {
+			attr: {
+				placeholder: "Enter your preferred study strategies...",
+				rows: "6",
+				style: "width: 100%; margin-bottom: 20px;"
+			}
+		});
+
+		const buttonContainer = contentEl.createDiv({
+			cls: "modal-button-container"
+		});
+
+		buttonContainer.createEl("button", {
+			text: "Generate Study Plan",
+			cls: "mod-cta"
+		}).addEventListener("click", () => {
+			this.submit();
+		});
+
+		this.goalInputEl.focus();
+	}
+
+	private submit() {
+		const goalText = this.goalInputEl.value;
+		const strategyText = this.strategyInputEl.value;
+		
+		if (!goalText && !strategyText) return;
+
+		const activity: Activity = {
+			type: "llm-graph",
+			prompt: `Goals: ${goalText}\n\nStrategies: ${strategyText}`
+		};
+		this.resolvePromise(activity);
+		this.close();
+	}
+
+	onClose() {
+		const { contentEl } = this;
+		contentEl.empty();
+	}
+
+	async open(): Promise<Activity | null> {
+		return new Promise((resolve) => {
+			this.resolvePromise = resolve;
+			super.open();
+		});
+	}
+}
+
 /**
  * This allows a "live-reload" of Obsidian when developing the plugin.
  * Any changes to the code will force reload Obsidian.
@@ -628,6 +713,48 @@ export default class CanvasDailyNotePlugin extends Plugin {
 					save: true,
 				});
 				break;
+			case "llm-graph":
+				width = 400;
+				height = 300;
+
+				// Here we'll create a text node that will be processed by the LLM
+				node = canvas.createTextNode({
+					pos: {
+						x: x,
+						y: y,
+						height: height,
+						width: width,
+					},
+					size: {
+						x: x,
+						y: y,
+						height: height,
+						width: width,
+					},
+					text: "Processing LLM request...\n\n" + activity.prompt,
+					focus: true,
+					save: true,
+				});
+
+				// Here you would typically make an API call to your LLM service
+				// For now, we'll just create a placeholder response
+				setTimeout(() => {
+					// This is where you'd process the LLM response and create additional nodes
+					// For demonstration, we'll just update the text
+					const previewView = node.nodeEl.querySelector('.markdown-preview-view');
+					if (previewView) {
+						previewView.textContent = 
+							"LLM Response:\n\n" + 
+							"1. Main Concept\n" +
+							"   - Sub-concept A\n" +
+							"   - Sub-concept B\n" +
+							"2. Related Concept\n" +
+							"   - Detail 1\n" +
+							"   - Detail 2";
+					}
+					canvas.requestSave();
+				}, 1000);
+				break;
 		}
 
 		console.log("Node created:", node); // Debug log
@@ -709,7 +836,8 @@ export default class CanvasDailyNotePlugin extends Plugin {
 			"webpage",
 			"create-flashcards",
 			"writing-activity",
-			"dialogue-tutoring"
+			"dialogue-tutoring",
+			"llm-graph"
 		];
 
 		activityTypes.forEach(type => {
@@ -738,6 +866,9 @@ export default class CanvasDailyNotePlugin extends Plugin {
 					case "dialogue-tutoring":
 						iconName = "message-circle";
 						break;
+					case "llm-graph":
+						iconName = "brain";
+						break;
 				}
 
 				const icon = getIcon(iconName);
@@ -745,11 +876,20 @@ export default class CanvasDailyNotePlugin extends Plugin {
 					button.appendChild(icon);
 					button.addEventListener("click", async () => {
 						console.log("Button clicked for type:", type); // Debug log
-						const modal = new ActivityModal(this.app, type);
-						const activity = await modal.open();
-						console.log("Activity returned from modal:", activity); // Debug log
-						if (activity) {
-							this.createActivity(activity, { x: 0, y: 0 });
+						if (type === "llm-graph") {
+							const modal = new LLMGraphModal(this.app);
+							const activity = await modal.open();
+							console.log("Activity returned from modal:", activity); // Debug log
+							if (activity) {
+								this.createActivity(activity, { x: 0, y: 0 });
+							}
+						} else {
+							const modal = new ActivityModal(this.app, type);
+							const activity = await modal.open();
+							console.log("Activity returned from modal:", activity); // Debug log
+							if (activity) {
+								this.createActivity(activity, { x: 0, y: 0 });
+							}
 						}
 					});
 				}
