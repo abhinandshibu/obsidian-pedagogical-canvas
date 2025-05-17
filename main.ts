@@ -1,6 +1,13 @@
-import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting } from 'obsidian';
+import { NodeCreationParams, TextNode } from 'types/node.types';
+import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, View } from 'obsidian';
+import {
+	AllCanvasNodeData,
+	CanvasEdgeData,
+	CanvasData,
+	NodeSide,
+} from "obsidian/canvas";
 
-// Remember to rename these classes and interfaces!
+
 
 interface MyPluginSettings {
 	mySetting: string;
@@ -61,6 +68,77 @@ export default class MyPlugin extends Plugin {
 
 					// This command will only show up in Command Palette when the check function returns true
 					return true;
+				}
+			},
+		});
+
+		// TODODODODO Add a command to create a canvas node
+		this.addCommand({
+			id: 'create-canvas-node',
+			name: 'Create Canvas Node',
+			callback: () => {
+				const view = this.app.workspace.activeLeaf?.view;
+				if (view && 'canvas' in view) {
+					const canvas = view.canvas as any;
+					
+					// Inspect the addNode function
+					console.log('addNode function:', canvas.addNode);
+					console.log('addNode function definition:', canvas.addNode.toString());
+					
+					// Create a text node
+					const textNode: any = {
+						type: 'text',
+						text: 'New Text Node',
+						x: 0,
+						y: 0,
+						width: 200,
+						height: 100,
+						id: 'text-node-2',
+						unknownData: {
+							id: 'text-node-2',
+							type: 'text',
+							text: 'New Text Node',
+						}
+					};
+					
+					// // Create a file node
+					// const fileNode: NodeCreationParams = {
+					// 	type: 'file',
+					// 	file: 'path/to/file.md',
+					// 	x: 250,
+					// 	y: 0,
+					// 	width: 200,
+					// 	height: 100
+					// };
+					
+					// // Create a link node
+					// const linkNode: NodeCreationParams = {
+					// 	type: 'link',
+					// 	url: 'https://example.com',
+					// 	x: 500,
+					// 	y: 0,
+					// 	width: 200,
+					// 	height: 100
+					// };
+					
+					// // Create a group node
+					// const groupNode: NodeCreationParams = {
+					// 	type: 'group',
+					// 	label: 'My Group',
+					// 	x: 750,
+					// 	y: 0,
+					// 	width: 200,
+					// 	height: 100,
+					// 	backgroundStyle: 'cover'
+					// };
+					
+					console.log(canvas.nodes);
+					// Add nodes to canvas
+					canvas.addNode(textNode);
+					// canvas.addNode(fileNode);
+					// canvas.addNode(linkNode);
+					// canvas.addNode(groupNode);
+					console.log(canvas.nodes);
 				}
 			}
 		});
