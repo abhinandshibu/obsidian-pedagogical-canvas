@@ -8,6 +8,7 @@ import {
 	TAbstractFile,
 	TFile,
 	getIcon,
+	Modal,
 } from "obsidian";
 
 const AUTO_UPDATE_DAILY_NOTE = "autoUpdateDailyNote";
@@ -31,6 +32,9 @@ interface Canvas {
 	removeNode(node: CanvasNode): void;
 	requestSave(): void;
 	createFileNode(options: any): CanvasNode;
+	createTextNode(options: any): CanvasNode;
+	createLinkNode(options: any): CanvasNode;
+	createGroupNode(options: any): CanvasNode;
 	deselectAll(): void;
 	addNode(node: CanvasNode): void;
 }
@@ -80,6 +84,204 @@ interface DailyNotePlugin {
 	options: DailyNotePluginOptions;
 }
 
+// MY TYPES 
+
+type Activity = 
+	| {
+		type: "youtube";
+		url: string;
+	}
+	| {
+		type: "webpage";
+		url: string;
+	}
+	| {
+		type: "create-flashcards";
+		scaffold: string;
+	}
+	| {
+		type: "writing-activity";
+		scaffold: string;
+	}
+	| {
+		type: "dialogue-tutoring";
+		systemPrompt: string;
+	};
+
+type Position = {
+	x: number;
+	y: number;
+}
+
+class TextInputModal extends Modal {
+	private text: string = "";
+	private resolvePromise: (value: string | null) => void;
+	private inputEl: HTMLInputElement;
+
+	constructor(app: App) {
+		super(app);
+	}
+
+	onOpen() {
+		const { contentEl } = this;
+		contentEl.createEl("h2", { text: "Enter text for the node" });
+
+		this.inputEl = contentEl.createEl("input", {
+			type: "text",
+			value: this.text
+		});
+
+		this.inputEl.addEventListener("keydown", (e) => {
+			if (e.key === "Enter") {
+				this.text = this.inputEl.value;
+				this.close();
+			}
+		});
+
+		const buttonContainer = contentEl.createDiv({
+			cls: "modal-button-container"
+		});
+
+		buttonContainer.createEl("button", {
+			text: "Cancel",
+			cls: "mod-warning"
+		}).addEventListener("click", () => {
+			this.close();
+		});
+
+		buttonContainer.createEl("button", {
+			text: "Submit",
+			cls: "mod-cta"
+		}).addEventListener("click", () => {
+			this.text = this.inputEl.value;
+			this.close();
+		});
+
+		this.inputEl.focus();
+	}
+
+	onClose() {
+		const { contentEl } = this;
+		contentEl.empty();
+		this.resolvePromise(this.text || null);
+	}
+
+	async open(): Promise<string | null> {
+		return new Promise((resolve) => {
+			this.resolvePromise = resolve;
+			super.open();
+		});
+	}
+}
+
+class ActivityModal extends Modal {
+	private resolvePromise: (value: any | null) => void;
+	private inputEl: HTMLInputElement;
+	private type: Activity["type"];
+
+	constructor(app: App, type: Activity["type"]) {
+		super(app);
+		this.type = type;
+	}
+
+	onOpen() {
+		const { contentEl } = this;
+		let title = "";
+		let placeholder = "";
+
+		switch (this.type) {
+			case "youtube":
+				title = "Add YouTube Activity";
+				placeholder = "Enter YouTube URL";
+				break;
+			case "webpage":
+				title = "Add Webpage Activity";
+				placeholder = "Enter webpage URL";
+				break;
+			case "create-flashcards":
+				title = "Add Flashcard Activity";
+				placeholder = "Enter flashcard scaffold";
+				break;
+			case "writing-activity":
+				title = "Add Writing Activity";
+				placeholder = "Enter writing scaffold";
+				break;
+			case "dialogue-tutoring":
+				title = "Add Dialogue Tutoring";
+				placeholder = "Enter system prompt";
+				break;
+		}
+
+		contentEl.createEl("h2", { text: title });
+
+		this.inputEl = contentEl.createEl("input", {
+			type: "text",
+			attr: { placeholder }
+		});
+
+		this.inputEl.addEventListener("keydown", (e) => {
+			if (e.key === "Enter") {
+				this.submit();
+			}
+		});
+
+		const buttonContainer = contentEl.createDiv({
+			cls: "modal-button-container"
+		});
+
+		buttonContainer.createEl("button", {
+			text: "Cancel",
+			cls: "mod-warning"
+		}).addEventListener("click", () => {
+			this.close();
+		});
+
+		buttonContainer.createEl("button", {
+			text: "Submit",
+			cls: "mod-cta"
+		}).addEventListener("click", () => {
+			this.submit();
+		});
+
+		this.inputEl.focus();
+	}
+
+	private submit() {
+		const value = this.inputEl.value;
+		if (!value) return;
+
+		let activity: Activity;
+		switch (this.type) {
+			case "youtube":
+			case "webpage":
+				activity = { type: this.type, url: value };
+				break;
+			case "create-flashcards":
+			case "writing-activity":
+				activity = { type: this.type, scaffold: value };
+				break;
+			case "dialogue-tutoring":
+				activity = { type: this.type, systemPrompt: value };
+				break;
+		}
+		console.log("Activity created in modal:", activity); // Debug log
+		this.resolvePromise(activity);
+		this.close();
+	}
+
+	onClose() {
+		const { contentEl } = this;
+		contentEl.empty();
+	}
+
+	async open(): Promise<Activity | null> {
+		return new Promise((resolve) => {
+			this.resolvePromise = resolve;
+			super.open();
+		});
+	}
+}
+
 /**
  * This allows a "live-reload" of Obsidian when developing the plugin.
  * Any changes to the code will force reload Obsidian.
@@ -110,6 +312,194 @@ export default class CanvasDailyNotePlugin extends Plugin {
 		this.registerEvent(
 			this.app.workspace.on("file-open", this.handleFileOpen.bind(this))
 		);
+
+		this.addCommand({
+			id: 'add-text-node',
+			name: 'Add Text Node',
+			callback: async () => {
+				const canvasView = this.app.workspace.getActiveViewOfType(ItemView) as CanvasView;
+				if (canvasView?.getViewType() !== "canvas") {
+					new Notice("Please open a canvas first");
+					return;
+				}
+
+				const modal = new TextInputModal(this.app);
+				const text = await modal.open();
+				if (!text) return; // User cancelled the prompt
+
+				const canvas = canvasView.canvas;
+				const node = canvas.createTextNode({
+					pos: {
+						x: 0,
+						y: 0,
+						height: 200,
+						width: 300,
+					},
+					size: {
+						x: 0,
+						y: 0,
+						height: 200,
+						width: 300,
+					},
+					text: text,
+					focus: true,
+					save: true,
+				});
+
+				canvas.deselectAll();
+				canvas.addNode(node);
+				canvas.requestSave();
+			},
+		});
+	}
+
+	createActivity(activity: Activity, startPosition: Position): number {
+		console.log("createActivity called with:", activity); // Debug log
+		
+		const canvasView = this.app.workspace.getActiveViewOfType(ItemView) as CanvasView;
+		if (canvasView?.getViewType() !== "canvas") {
+			new Notice("Please open a canvas first");
+			return 0;
+		}
+
+		const canvas = canvasView.canvas;
+		let node: CanvasNode;
+		let width: number;
+		let height: number;
+
+		// Calculate position based on existing nodes
+		let x = startPosition.x;
+		let y = startPosition.y;
+		
+		// If there are existing nodes, position the new one to the right of the rightmost node
+		if (canvas.nodes.length > 0) {
+			const rightmostNode = canvas.nodes.reduce((rightmost, node) => {
+				return node.x > rightmost.x ? node : rightmost;
+			}, canvas.nodes[0]);
+			x = rightmostNode.x + rightmostNode.width + 50; // Add 50px spacing
+		}
+
+		console.log("Creating node for activity type:", activity.type); // Debug log
+
+		switch (activity.type) {
+			case "youtube":
+				width = 400;
+				height = 300;
+
+				node = canvas.createLinkNode({
+					pos: {
+						x: x,
+						y: y,
+						height: height,
+						width: width,
+					},
+					size: {
+						x: x,
+						y: y,
+						height: height,
+						width: width,
+					},
+					url: activity.url,
+					focus: true,
+					save: true,
+				});
+				break;
+			case "webpage":
+				width = 400;
+				height = 300;
+
+				node = canvas.createLinkNode({
+					pos: {
+						x: x,
+						y: y,
+						height: height,
+						width: width,
+					},
+					size: {
+						x: x,
+						y: y,
+						height: height,
+						width: width,
+					},
+					url: activity.url,
+					focus: true,
+					save: true,
+				});
+				break;
+			case "create-flashcards":
+				width = 400;
+				height = 300;
+
+				node = canvas.createTextNode({
+					pos: {
+						x: x,
+						y: y,
+						height: height,
+						width: width,
+					},
+					size: {
+						x: x,
+						y: y,
+						height: height,
+						width: width,
+					},
+					text: activity.scaffold,
+					focus: true,
+					save: true,
+				});
+				break;
+			case "writing-activity":
+				width = 400;
+				height = 300;
+
+				node = canvas.createTextNode({
+					pos: {
+						x: x,
+						y: y,
+						height: height,
+						width: width,
+					},
+					size: {
+						x: x,
+						y: y,
+						height: height,
+						width: width,
+					},
+					text: activity.scaffold,
+					focus: true,
+					save: true,
+				});
+				break;
+			case "dialogue-tutoring":
+				width = 400;
+				height = 300;
+
+				node = canvas.createLinkNode({
+					pos: {
+						x: x,
+						y: y,
+						height: height,
+						width: width,
+					},
+					size: {
+						x: x,
+						y: y,
+						height: height,
+						width: width,
+					},
+					url: 'https://chat.openai.com/?q=' + encodeURIComponent(activity.systemPrompt),
+					focus: true,
+					save: true,
+				});
+				break;
+		}
+
+		console.log("Node created:", node); // Debug log
+
+		canvas.deselectAll();
+		canvas.addNode(node);
+		canvas.requestSave();
+		return x + width;
 	}
 
 	/**
@@ -145,34 +535,90 @@ export default class CanvasDailyNotePlugin extends Plugin {
 				},
 			});
 
-			const icon = getIcon("calendar") as Node;
-			button.appendChild(icon).addEventListener("click", async () => {
-				let dailyFile = this.getExistingDailyFile();
-				if (!dailyFile && !this.settings.createIfNotExists) {
-					new Notice(
-						"Daily note currently does not exist and plugin settings are set to not create it."
-					);
-					return;
-				}
+			const icon = getIcon("calendar");
+			if (icon) {
+				button.appendChild(icon);
+				button.addEventListener("click", async () => {
+					let dailyFile = this.getExistingDailyFile();
+					if (!dailyFile && !this.settings.createIfNotExists) {
+						new Notice(
+							"Daily note currently does not exist and plugin settings are set to not create it."
+						);
+						return;
+					}
 
-				// Don't create note on days that are configured to be skipped
-				const dayOfTheWeek = DAYS[new Date().getDay()];
-				// @ts-ignore
-				if (!dailyFile && this.settings[`skip${dayOfTheWeek}`]) {
-					new Notice(
-						`Daily note currently does not exist and plugin settings are set to not create it on ${dayOfTheWeek}.`
-					);
-					return;
-				}
+					// Don't create note on days that are configured to be skipped
+					const dayOfTheWeek = DAYS[new Date().getDay()];
+					// @ts-ignore
+					if (!dailyFile && this.settings[`skip${dayOfTheWeek}`]) {
+						new Notice(
+							`Daily note currently does not exist and plugin settings are set to not create it on ${dayOfTheWeek}.`
+						);
+						return;
+					}
 
-				// This will either get the existing note or create a new one. Either way, returns the file.
-				dailyFile = await this.dailyNotePlugin.getDailyNote();
+					// This will either get the existing note or create a new one. Either way, returns the file.
+					dailyFile = await this.dailyNotePlugin.getDailyNote();
 
-				if (dailyFile instanceof TFile) {
-					this.addDailyNote(canvas, dailyFile);
-				}
-			});
+					if (dailyFile instanceof TFile) {
+						this.addDailyNote(canvas, dailyFile);
+					}
+				});
+			}
 		}
+
+		// Add activity buttons
+		const activityTypes: Activity["type"][] = [
+			"youtube",
+			"webpage",
+			"create-flashcards",
+			"writing-activity",
+			"dialogue-tutoring"
+		];
+
+		activityTypes.forEach(type => {
+			const buttonId = `canvas-button-${type}`;
+			if (!cardMenuEl.querySelector(`.${buttonId}`)) {
+				const button = cardMenuEl.createEl("div", {
+					attr: {
+						class: `canvas-card-menu-button ${buttonId}`,
+					},
+				});
+
+				let iconName = "";
+				switch (type) {
+					case "youtube":
+						iconName = "video";
+						break;
+					case "webpage":
+						iconName = "link";
+						break;
+					case "create-flashcards":
+						iconName = "book";
+						break;
+					case "writing-activity":
+						iconName = "edit";
+						break;
+					case "dialogue-tutoring":
+						iconName = "message-circle";
+						break;
+				}
+
+				const icon = getIcon(iconName);
+				if (icon) {
+					button.appendChild(icon);
+					button.addEventListener("click", async () => {
+						console.log("Button clicked for type:", type); // Debug log
+						const modal = new ActivityModal(this.app, type);
+						const activity = await modal.open();
+						console.log("Activity returned from modal:", activity); // Debug log
+						if (activity) {
+							this.createActivity(activity, { x: 0, y: 0 });
+						}
+					});
+				}
+			}
+		});
 	}
 
 	/**
