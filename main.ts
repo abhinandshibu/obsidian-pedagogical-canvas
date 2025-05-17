@@ -10,6 +10,7 @@ import {
 	getIcon,
 	Modal,
 } from "obsidian";
+import OpenAI from "openai";
 
 const AUTO_UPDATE_DAILY_NOTE = "autoUpdateDailyNote";
 const DAYS = [
@@ -62,6 +63,7 @@ interface CanvasDailyNotePluginSettings {
 	skipFriday: boolean;
 	skipSaturday: boolean;
 	skipSunday: boolean;
+	openaiApiKey: string;
 }
 
 const DEFAULT_SETTINGS: CanvasDailyNotePluginSettings = {
@@ -73,6 +75,7 @@ const DEFAULT_SETTINGS: CanvasDailyNotePluginSettings = {
 	skipFriday: false,
 	skipSaturday: false,
 	skipSunday: false,
+	openaiApiKey: "",
 };
 
 interface DailyNotePluginOptions {
@@ -267,6 +270,8 @@ class ActivityModal extends Modal {
 			case "dialogue-tutoring":
 				activity = { type: this.type, systemPrompt: value };
 				break;
+			default:
+				return;
 		}
 		console.log("Activity created in modal:", activity); // Debug log
 		this.resolvePromise(activity);
@@ -386,6 +391,7 @@ class MultiActivityModal extends Modal {
 			const type = (container.querySelector("select") as HTMLSelectElement).value as Activity["type"];
 			const value = (container.querySelector("input") as HTMLInputElement).value;
 			if (!value) return;
+			
 			let activity: Activity;
 			switch (type) {
 				case "youtube":
@@ -399,6 +405,8 @@ class MultiActivityModal extends Modal {
 				case "dialogue-tutoring":
 					activity = { type, systemPrompt: value };
 					break;
+				default:
+					return;
 			}
 			activities.push(activity);
 		});
@@ -574,7 +582,7 @@ export default class CanvasDailyNotePlugin extends Plugin {
 		});
 	}
 
-	createActivity(activity: Activity, startPosition: Position): number {
+	async createActivity(activity: Activity, startPosition: Position): Promise<number> {
 		console.log("createActivity called with:", activity); // Debug log
 		
 		const canvasView = this.app.workspace.getActiveViewOfType(ItemView) as CanvasView;
@@ -717,7 +725,7 @@ export default class CanvasDailyNotePlugin extends Plugin {
 				width = 400;
 				height = 300;
 
-				// Here we'll create a text node that will be processed by the LLM
+				// Create initial node showing processing
 				node = canvas.createTextNode({
 					pos: {
 						x: x,
@@ -731,30 +739,29 @@ export default class CanvasDailyNotePlugin extends Plugin {
 						height: height,
 						width: width,
 					},
-					text: "Processing LLM request...\n\n" + activity.prompt,
+					text: "Processing your learning plan...\n\n" + activity.prompt,
 					focus: true,
 					save: true,
 				});
 
-				// Here you would typically make an API call to your LLM service
-				// For now, we'll just create a placeholder response
-				setTimeout(() => {
-					// This is where you'd process the LLM response and create additional nodes
-					// For demonstration, we'll just update the text
-					const previewView = node.nodeEl.querySelector('.markdown-preview-view');
-					if (previewView) {
-						previewView.textContent = 
-							"LLM Response:\n\n" + 
-							"1. Main Concept\n" +
-							"   - Sub-concept A\n" +
-							"   - Sub-concept B\n" +
-							"2. Related Concept\n" +
-							"   - Detail 1\n" +
-							"   - Detail 2";
-					}
-					canvas.requestSave();
-				}, 1000);
-				break;
+				canvas.deselectAll();
+				canvas.addNode(node);
+				canvas.requestSave();
+
+				// Generate activities using OpenAI
+				const [goals, strategies] = activity.prompt.split("\n\n");
+				const activities = await this.generateLearningActivities(goals, strategies);
+
+				// Create nodes for each activity
+				let currentX = x;
+				let currentY = y + height + 50; // Position below the initial node
+
+				for (const generatedActivity of activities) {
+					await this.createActivity(generatedActivity, { x: currentX, y: currentY });
+					currentX += 450; // Space nodes horizontally
+				}
+
+				return x + width;
 		}
 
 		console.log("Node created:", node); // Debug log
@@ -881,14 +888,14 @@ export default class CanvasDailyNotePlugin extends Plugin {
 							const activity = await modal.open();
 							console.log("Activity returned from modal:", activity); // Debug log
 							if (activity) {
-								this.createActivity(activity, { x: 0, y: 0 });
+								await this.createActivity(activity, { x: 0, y: 0 });
 							}
 						} else {
 							const modal = new ActivityModal(this.app, type);
 							const activity = await modal.open();
 							console.log("Activity returned from modal:", activity); // Debug log
 							if (activity) {
-								this.createActivity(activity, { x: 0, y: 0 });
+								await this.createActivity(activity, { x: 0, y: 0 });
 							}
 						}
 					});
@@ -919,7 +926,7 @@ export default class CanvasDailyNotePlugin extends Plugin {
 					let currentX = 0;
 					let currentY = 0;
 					for (const activity of activities) {
-						this.createActivity(activity, { x: currentX, y: currentY });
+						await this.createActivity(activity, { x: currentX, y: currentY });
 						currentX += 450; // space nodes horizontally
 					}
 				}
@@ -1038,6 +1045,74 @@ export default class CanvasDailyNotePlugin extends Plugin {
 	async saveSettings() {
 		await this.saveData(this.settings);
 	}
+
+	async generateLearningActivities(goals: string, strategies: string): Promise<Activity[]> {
+		if (!this.settings.openaiApiKey) {
+			new Notice("Please add your OpenAI API key in the plugin settings");
+			return [];
+		}
+
+		const openai = new OpenAI({
+			apiKey: this.settings.openaiApiKey,
+			dangerouslyAllowBrowser: true,
+		});
+
+		const prompt = `You are a pedagogical learning orchestrator using the Knowledge-Learning-Instruction (KLI) framework.
+Based on the following learning goals and preferred strategies, create a sequence of learning activities.
+
+Learning Goals:
+${goals}
+
+Preferred Strategies:
+${strategies}
+
+Please analyze these inputs and create a sequence of activities that will help achieve the learning goals.
+Consider:
+1. Knowledge acquisition and understanding
+2. Practice and application
+3. Feedback and reflection
+4. Metacognitive strategies
+
+Respond with a JSON array of activities, where each activity follows this schema:
+{
+  "type": "youtube" | "webpage" | "create-flashcards" | "writing-activity" | "dialogue-tutoring",
+  "url"?: string,  // for youtube and webpage types
+  "scaffold"?: string,  // for create-flashcards and writing-activity types
+  "systemPrompt"?: string  // for dialogue-tutoring type
+}
+
+Each activity should be specific and actionable.`;
+
+		try {
+			const completion = await openai.chat.completions.create({
+				model: "gpt-4",
+				messages: [
+					{
+						role: "system",
+						content: "You are a pedagogical learning orchestrator that creates structured learning activities based on user goals and preferences."
+					},
+					{
+						role: "user",
+						content: prompt
+					}
+				],
+				temperature: 0.7,
+			});
+
+			const response = completion.choices[0]?.message?.content;
+			if (!response) {
+				throw new Error("No response from OpenAI");
+			}
+
+			// Parse the JSON response
+			const activities = JSON.parse(response) as Activity[];
+			return activities;
+		} catch (error) {
+			console.error("Error generating learning activities:", error);
+			new Notice("Error generating learning activities. Please check the console for details.");
+			return [];
+		}
+	}
 }
 
 class CanvasDailyNotePluginSettingTab extends PluginSettingTab {
@@ -1052,6 +1127,19 @@ class CanvasDailyNotePluginSettingTab extends PluginSettingTab {
 		const { containerEl } = this;
 
 		containerEl.empty();
+
+		new Setting(containerEl)
+			.setName("OpenAI API Key")
+			.setDesc("Enter your OpenAI API key to enable AI-powered learning orchestration")
+			.addText(text => text
+				.setPlaceholder("sk-...")
+				.setValue(this.plugin.settings.openaiApiKey)
+				.onChange(async (value) => {
+					this.plugin.settings.openaiApiKey = value;
+					await this.plugin.saveSettings();
+				}));
+
+		containerEl.createEl("hr");
 
 		new Setting(containerEl)
 			.setName("Automatically create daily note")
