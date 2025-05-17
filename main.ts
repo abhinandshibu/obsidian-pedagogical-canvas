@@ -1,212 +1,342 @@
-import { NodeCreationParams, TextNode } from 'types/node.types';
-import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, View } from 'obsidian';
 import {
-	AllCanvasNodeData,
-	CanvasEdgeData,
-	CanvasData,
-	NodeSide,
-} from "obsidian/canvas";
+	App,
+	ItemView,
+	Notice,
+	Plugin,
+	PluginSettingTab,
+	Setting,
+	TAbstractFile,
+	TFile,
+	getIcon,
+} from "obsidian";
 
+const AUTO_UPDATE_DAILY_NOTE = "autoUpdateDailyNote";
+const DAYS = [
+	"Sunday",
+	"Monday",
+	"Tuesday",
+	"Wednesday",
+	"Thursday",
+	"Friday",
+	"Saturday",
+];
 
-
-interface MyPluginSettings {
-	mySetting: string;
+interface CanvasView extends ItemView {
+	canvas: Canvas;
 }
 
-const DEFAULT_SETTINGS: MyPluginSettings = {
-	mySetting: 'default'
+interface Canvas {
+	cardMenuEl: HTMLElement;
+	nodes: CanvasNode[];
+	removeNode(node: CanvasNode): void;
+	requestSave(): void;
+	createFileNode(options: any): CanvasNode;
+	deselectAll(): void;
+	addNode(node: CanvasNode): void;
 }
 
-export default class MyPlugin extends Plugin {
-	settings: MyPluginSettings;
+interface CanvasNode {
+	unknownData: UnknownData;
+	nodeEl: HTMLElement;
+	file: TFile;
+	x: number;
+	y: number;
+	width: number;
+	height: number;
+}
+
+interface UnknownData {
+	nodeType: string;
+}
+
+interface CanvasDailyNotePluginSettings {
+	createIfNotExists: boolean;
+	skipMonday: boolean;
+	skipTuesday: boolean;
+	skipWednesday: boolean;
+	skipThursday: boolean;
+	skipFriday: boolean;
+	skipSaturday: boolean;
+	skipSunday: boolean;
+}
+
+const DEFAULT_SETTINGS: CanvasDailyNotePluginSettings = {
+	createIfNotExists: false,
+	skipMonday: false,
+	skipTuesday: false,
+	skipWednesday: false,
+	skipThursday: false,
+	skipFriday: false,
+	skipSaturday: false,
+	skipSunday: false,
+};
+
+interface DailyNotePluginOptions {
+	folder: string;
+}
+
+interface DailyNotePlugin {
+	getDailyNote(): TFile;
+	options: DailyNotePluginOptions;
+}
+
+/**
+ * This allows a "live-reload" of Obsidian when developing the plugin.
+ * Any changes to the code will force reload Obsidian.
+ */
+// if (process.env.NODE_ENV === "development") {
+// 	new EventSource("http://127.0.0.1:8000/esbuild").addEventListener(
+// 		"change",
+// 		() => location.reload()
+// 	);
+// }
+
+export default class CanvasDailyNotePlugin extends Plugin {
+	settings: CanvasDailyNotePluginSettings;
+	dailyNotePlugin: DailyNotePlugin;
 
 	async onload() {
 		await this.loadSettings();
 
-		// This creates an icon in the left ribbon.
-		const ribbonIconEl = this.addRibbonIcon('dice', 'Sample Plugin', (evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
-		});
-		// Perform additional things with the ribbon
-		ribbonIconEl.addClass('my-plugin-ribbon-class');
-
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status Bar Text');
-
-		// This adds a simple command that can be triggered anywhere
-		this.addCommand({
-			id: 'open-sample-modal-simple',
-			name: 'Open sample modal (simple)',
-			callback: () => {
-				new SampleModal(this.app).open();
-			}
-		});
-		// This adds an editor command that can perform some operation on the current editor instance
-		this.addCommand({
-			id: 'sample-editor-command',
-			name: 'Sample editor command',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
-				console.log(editor.getSelection());
-				editor.replaceSelection('Sample Editor Command');
-			}
-		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-sample-modal-complex',
-			name: 'Open sample modal (complex)',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new SampleModal(this.app).open();
-					}
-
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
-				}
-			},
-		});
-
-		// TODODODODO Add a command to create a canvas node
-		this.addCommand({
-			id: 'create-canvas-node',
-			name: 'Create Canvas Node',
-			callback: () => {
-				const view = this.app.workspace.activeLeaf?.view;
-				if (view && 'canvas' in view) {
-					const canvas = view.canvas as any;
-					
-					// Inspect the addNode function
-					console.log('addNode function:', canvas.addNode);
-					console.log('addNode function definition:', canvas.addNode.toString());
-					
-					// Create a text node
-					const textNode: any = {
-						type: 'text',
-						text: 'New Text Node',
-						x: 0,
-						y: 0,
-						width: 200,
-						height: 100,
-						id: 'text-node-2',
-						unknownData: {
-							id: 'text-node-2',
-							type: 'text',
-							text: 'New Text Node',
-						}
-					};
-					
-					// // Create a file node
-					// const fileNode: NodeCreationParams = {
-					// 	type: 'file',
-					// 	file: 'path/to/file.md',
-					// 	x: 250,
-					// 	y: 0,
-					// 	width: 200,
-					// 	height: 100
-					// };
-					
-					// // Create a link node
-					// const linkNode: NodeCreationParams = {
-					// 	type: 'link',
-					// 	url: 'https://example.com',
-					// 	x: 500,
-					// 	y: 0,
-					// 	width: 200,
-					// 	height: 100
-					// };
-					
-					// // Create a group node
-					// const groupNode: NodeCreationParams = {
-					// 	type: 'group',
-					// 	label: 'My Group',
-					// 	x: 750,
-					// 	y: 0,
-					// 	width: 200,
-					// 	height: 100,
-					// 	backgroundStyle: 'cover'
-					// };
-					
-					console.log(canvas.nodes);
-					// Add nodes to canvas
-					canvas.addNode(textNode);
-					// canvas.addNode(fileNode);
-					// canvas.addNode(linkNode);
-					// canvas.addNode(groupNode);
-					console.log(canvas.nodes);
-				}
-			}
-		});
+		// Get an instance of the daily notes plugin so we can interact with it
+		this.dailyNotePlugin = (this.app as any).internalPlugins.getPluginById(
+			"daily-notes"
+		)?.instance;
 
 		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
+		this.addSettingTab(new CanvasDailyNotePluginSettingTab(this.app, this));
 
-		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
-		// Using this function will automatically remove the event listener when this plugin is disabled.
-		this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
-			console.log('click', evt);
+		// Hook into the file open event
+		this.registerEvent(
+			this.app.workspace.on("file-open", this.handleFileOpen.bind(this))
+		);
+	}
+
+	/**
+	 * When a file is opened, we check if the file is a canvas. If it is, we'll hook into it.
+	 */
+	async handleFileOpen() {
+		const canvasView = this.app.workspace.getActiveViewOfType(
+			ItemView
+		) as CanvasView;
+
+		// Only need to run this code if we're looking at a canvas
+		if (canvasView?.getViewType() !== "canvas") {
+			return;
+		}
+
+		const canvas = canvasView?.canvas;
+		this.createButton(canvas);
+		this.processCanvasNodes(canvas);
+	}
+
+	/**
+	 * Add a new button to the card UI at the bottom. Clicking the button will attempt to add a daily note to the canvas.
+	 * @param canvas
+	 */
+	createButton(canvas: Canvas) {
+		const cardMenuEl = canvas.cardMenuEl;
+
+		// Only create the canvas button if it doesn't already exist
+		if (!cardMenuEl.querySelector(".canvas-button-adddailynote")) {
+			const button = cardMenuEl.createEl("div", {
+				attr: {
+					class: "canvas-card-menu-button canvas-button-adddailynote",
+				},
+			});
+
+			const icon = getIcon("calendar") as Node;
+			button.appendChild(icon).addEventListener("click", async () => {
+				let dailyFile = this.getExistingDailyFile();
+				if (!dailyFile && !this.settings.createIfNotExists) {
+					new Notice(
+						"Daily note currently does not exist and plugin settings are set to not create it."
+					);
+					return;
+				}
+
+				// Don't create note on days that are configured to be skipped
+				const dayOfTheWeek = DAYS[new Date().getDay()];
+				// @ts-ignore
+				if (!dailyFile && this.settings[`skip${dayOfTheWeek}`]) {
+					new Notice(
+						`Daily note currently does not exist and plugin settings are set to not create it on ${dayOfTheWeek}.`
+					);
+					return;
+				}
+
+				// This will either get the existing note or create a new one. Either way, returns the file.
+				dailyFile = await this.dailyNotePlugin.getDailyNote();
+
+				if (dailyFile instanceof TFile) {
+					this.addDailyNote(canvas, dailyFile);
+				}
+			});
+		}
+	}
+
+	/**
+	 * This services two purposes
+	 * 1. Adding a styling class to the daily note nodes
+	 * 2. Updating any out of date daily note nodes with today's note
+	 * @param canvas
+	 */
+	processCanvasNodes(canvas: Canvas) {
+		let dailyFile = this.getExistingDailyFile();
+
+		canvas.nodes.forEach(async (node) => {
+			if (node.unknownData.nodeType !== AUTO_UPDATE_DAILY_NOTE) {
+				return;
+			}
+			// Add class to each found auto daily note
+			node.nodeEl.addClass("canvas-node-dailynote");
+
+			// If the note is out of date, replace it with a new daily note node in the same x/y with the same width/height
+			if (node?.file?.path !== dailyFile?.path || !node.file) {
+				if (!dailyFile && !this.settings.createIfNotExists) {
+					return;
+				}
+
+				const dayOfTheWeek = DAYS[new Date().getDay()];
+				// @ts-ignore
+				if (!dailyFile && this.settings[`skip${dayOfTheWeek}`]) {
+					return;
+				}
+
+				canvas.removeNode(node);
+				canvas.requestSave();
+
+				dailyFile = await this.dailyNotePlugin.getDailyNote();
+
+				if (dailyFile instanceof TFile) {
+					this.addDailyNote(canvas, dailyFile, {
+						x: node.x,
+						y: node.y,
+						width: node.width,
+						height: node.height,
+					});
+				}
+			}
 		});
-
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
 	}
 
-	onunload() {
+	/**
+	 * Gets the existing daily note based on the daily notes plugin settings or returns null if it does not exist.
+	 */
+	getExistingDailyFile(): TFile | TAbstractFile | null | undefined {
+		const dailyFolder = this.dailyNotePlugin.options.folder;
+		const expectedNotePath = `${dailyFolder.replace(
+			/^\/|\\/,
+			""
+		)}/${new Date().getFullYear()}-${String(
+			new Date().getMonth() + 1
+		).padStart(2, "0")}-${String(new Date().getDate()).padStart(
+			2,
+			"0"
+		)}.md`;
+		let dailyFile = this.app.vault.getAbstractFileByPath(expectedNotePath);
 
+		return dailyFile;
 	}
 
+	/**
+	 * Adds the Daily Note node to the canvas. Stores a special "nodeType" property so we can identify it later.
+	 * @param canvas
+	 * @param dailyFile
+	 * @param options
+	 */
+	addDailyNote(canvas: Canvas, dailyFile: TFile, options: any = {}) {
+		const dailyFileNode = canvas.createFileNode({
+			pos: {
+				x: options.x || 0,
+				y: options.y || 0,
+				height: options.height || 500,
+				width: options.width || 500,
+			},
+			size: {
+				x: options.x || 0,
+				y: options.y || 0,
+				height: options.height || 500,
+				width: options.width || 500,
+			},
+			file: dailyFile,
+			path: this.dailyNotePlugin.options.folder,
+			focus: false,
+			save: true,
+		});
+		dailyFileNode.unknownData.nodeType = AUTO_UPDATE_DAILY_NOTE;
+		canvas.deselectAll();
+		canvas.addNode(dailyFileNode);
+		canvas.requestSave();
+	}
+
+	onunload() {}
+
+	/**
+	 * Load data from disk, stored in data.json in plugin folder
+	 */
 	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+		const data = (await this.loadData()) || {};
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
 	}
 
+	/**
+	 * Save data to disk, stored in data.json in plugin folder
+	 */
 	async saveSettings() {
 		await this.saveData(this.settings);
 	}
 }
 
-class SampleModal extends Modal {
-	constructor(app: App) {
-		super(app);
-	}
+class CanvasDailyNotePluginSettingTab extends PluginSettingTab {
+	plugin: CanvasDailyNotePlugin;
 
-	onOpen() {
-		const {contentEl} = this;
-		contentEl.setText('Woah!');
-	}
-
-	onClose() {
-		const {contentEl} = this;
-		contentEl.empty();
-	}
-}
-
-class SampleSettingTab extends PluginSettingTab {
-	plugin: MyPlugin;
-
-	constructor(app: App, plugin: MyPlugin) {
+	constructor(app: App, plugin: CanvasDailyNotePlugin) {
 		super(app, plugin);
 		this.plugin = plugin;
 	}
 
 	display(): void {
-		const {containerEl} = this;
+		const { containerEl } = this;
 
 		containerEl.empty();
 
 		new Setting(containerEl)
-			.setName('Setting #1')
-			.setDesc('It\'s a secret')
-			.addText(text => text
-				.setPlaceholder('Enter your secret')
-				.setValue(this.plugin.settings.mySetting)
-				.onChange(async (value) => {
-					this.plugin.settings.mySetting = value;
-					await this.plugin.saveSettings();
-				}));
+			.setName("Automatically create daily note")
+			.setDesc(
+				`Should the plugin attempt to create the daily note if it does not exist?`
+			)
+			.addToggle((component) => {
+				component.setValue(this.plugin.settings.createIfNotExists);
+				component.onChange((value) => {
+					this.plugin.settings.createIfNotExists = value;
+					this.plugin.saveSettings();
+				});
+			});
+
+		containerEl.createEl("hr");
+
+		containerEl.createEl("h1", { text: "Skip days" });
+		containerEl.createEl("p", {
+			attr: {
+				style: "display: block; margin-bottom: 10px",
+			},
+			text: "If there are certain days of the week you wish to skip creating a new note for, you can configure that here. The plugin will not attempt to automatically create new notes on those days.",
+		});
+
+		DAYS.forEach((day) => {
+			new Setting(containerEl)
+				.setName(day)
+				.setDesc(`Skip automatically creating notes on ${day}?`)
+				.addToggle((component) => {
+					// @ts-ignore
+					component.setValue(this.plugin.settings[`skip${day}`]);
+					component.onChange((value) => {
+						// @ts-ignore
+						this.plugin.settings[`skip${day}`] = value;
+						this.plugin.saveSettings();
+					});
+				});
+		});
 	}
 }
